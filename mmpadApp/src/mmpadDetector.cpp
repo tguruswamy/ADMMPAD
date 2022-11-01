@@ -246,6 +246,8 @@ asynStatus mmpadDetector::waitForFileToExist(const char *fileName, epicsTimeStam
     if (pStartTime) epicsTimeToTime_t(&acqStartTime, pStartTime);
     epicsTimeGetCurrent(&tStart);
 
+    printf("Waiting for file to be created %s\n", fileName);
+
     while (deltaTime <= timeout) {
         fd = open(fileName, O_RDONLY, 0);
         if ((fd >= 0) && (timeout != 0.)) {
@@ -320,6 +322,8 @@ int mmpadDetector::stringEndsWith(const char *aString, const char *aSubstring, i
  */
 asynStatus mmpadDetector::readImageFile(const char *fileName, epicsTimeStamp *pStartTime, double timeout, NDArray *pImage)
 {
+    printf("Reading image file %s\n", fileName);
+
     //static const char *functionName = "readImageFile";
     char tifFileName[MAX_FILENAME_LEN];
 
@@ -339,6 +343,9 @@ asynStatus mmpadDetector::readImageFile(const char *fileName, epicsTimeStamp *pS
  */
 asynStatus mmpadDetector::readTiff(const char *fileName, epicsTimeStamp *pStartTime, double timeout, NDArray *pImage)
 {
+
+    printf("Reading tiff file %s\n", fileName);
+
     epicsTimeStamp tStart, tCheck;
     double deltaTime;
     int status=-1;
@@ -392,7 +399,7 @@ asynStatus mmpadDetector::readTiff(const char *fileName, epicsTimeStamp *pStartT
         buffer = (char *)pImage->pData;
         totalSize = 0;
         for (strip=0; (strip < numStrips) && (totalSize < pImage->dataSize); strip++) {
-            size = TIFFReadEncodedStrip(tiff, 0, buffer, pImage->dataSize-totalSize);
+            size = TIFFReadEncodedStrip(tiff, strip, buffer, pImage->dataSize-totalSize);
             if (size == -1) {
                 /* There was an error reading the file.  Most commonly this is because the file
                  * was not yet completely written.  Try again. */
@@ -441,6 +448,7 @@ asynStatus mmpadDetector::readTiff(const char *fileName, epicsTimeStamp *pStartT
 
     if (tiff != NULL) TIFFClose(tiff);
 
+    printf("Reading file %s complete\n", fileName);
     return(asynSuccess);
 }   
 
@@ -594,12 +602,12 @@ void mmpadDetector::mmpadTask()
 {
     int status = asynSuccess;
     int stat2;
-//  int imageCounter;
+    int imageCounter;
     int numImages;
     int multipleFileNextImage=0;  /* This is the next image number, starting at 0 */
     int acquire;
     ADStatus_t acquiring;
-//  NDArray *pImage;
+    NDArray *pImage;
     double acquireTime, acquirePeriod;
     double readImageFileTimeout, timeout;
     int triggerMode;
@@ -607,8 +615,8 @@ void mmpadDetector::mmpadTask()
     const char *functionName = "mmpadTask";
     char fullFileName[MAX_FILENAME_LEN];
     int fileFormat;
-//  char statusMessage[MAX_MESSAGE_SIZE];
-//  int dims[2];
+    char statusMessage[MAX_MESSAGE_SIZE];
+    size_t dims[2];
     int arrayCallbacks;
     int roisum,roiul,roiur,roill,roilr;
     string a;
@@ -756,71 +764,73 @@ void mmpadDetector::mmpadTask()
             }
             stat2 = getIntegerParam(NDArrayCallbacks, &arrayCallbacks);
   
-            //if (arrayCallbacks && numImages==1)
-              //{
-                //stat2 = getIntegerParam(NDArrayCounter, &imageCounter);
-                //imageCounter++;
-                //stat2 = setIntegerParam(NDArrayCounter, imageCounter);
-                // /* Call the callbacks to update any changes */
-                //stat2 = callParamCallbacks();
+            if (arrayCallbacks && numImages==1)
+              {
+                stat2 = getIntegerParam(NDArrayCounter, &imageCounter);
+                imageCounter++;
+                stat2 = setIntegerParam(NDArrayCounter, imageCounter);
+                 /* Call the callbacks to update any changes */
+                stat2 = callParamCallbacks();
   
-                // /* Get an image buffer from the pool */
-                //stat2 = getIntegerParam(ADMaxSizeX, &dims[0]);
-                //stat2 = getIntegerParam(ADMaxSizeY, &dims[1]);
-                //pImage = this->pNDArrayPool->alloc(2, dims, NDInt32, 0, NULL);
-                //epicsSnprintf(statusMessage, sizeof(statusMessage), "Reading image file %s", fullFileName);
-                //stat2 = setStringParam(ADStatusMessage, statusMessage);
-                //stat2 = callParamCallbacks();
-                // /* We release the mutex when calling readImageFile, because this takes a long time and
-                 //* we need to allow abort operations to get through */
-                //this->unlock();
-                //status = readImageFile(fullFileName, &startTime, acquireTime + readImageFileTimeout, pImage);
-                //this->lock();
-                // /* If there was an error jump to bottom of loop */
-                //if (status)
-                  //{
-                    //acquire = 0;
-                    //pImage->release();
-                    //continue;
-                  //}
+                 /* Get an image buffer from the pool */
+		int sizeX;
+		int sizeY;
+                stat2 = getIntegerParam(ADMaxSizeX, &sizeX);
+                stat2 = getIntegerParam(ADMaxSizeY, &sizeY);
+		dims[0] = sizeX;
+		dims[1] = sizeY;
+                pImage = this->pNDArrayPool->alloc(2, dims, NDInt32, 0, NULL);
+                epicsSnprintf(statusMessage, sizeof(statusMessage), "Reading image file %s", fullFileName);
+                stat2 = setStringParam(ADStatusMessage, statusMessage);
+                stat2 = callParamCallbacks();
+                 /* We release the mutex when calling readImageFile, because this takes a long time and
+                 * we need to allow abort operations to get through */
+                this->unlock();
+                status = readImageFile(fullFileName, &startTime, acquireTime + readImageFileTimeout, pImage);
+                this->lock();
+                 /* If there was an error jump to bottom of loop */
+                if (status)
+                  {
+	            printf("Error reading file!\n");
+                    acquire = 0;
+                    pImage->release();
+                    continue;
+                  }
   
-                //stat2 = getIntegerParam(mmpadFlatFieldValid, &flatFieldValid);
-                //if (flatFieldValid)
-                  //{
-                    //epicsInt32 *pData, *pFlat, i;
-                    //for (i=0, pData = (epicsInt32 *)pImage->pData, pFlat = (epicsInt32 *)this->pFlatField->pData;
-                         //i<dims[0]*dims[1];
-                         //i++, pData++, pFlat++)
-                      //{
-                        //*pData = (epicsInt32)((this->averageFlatField * *pData) / *pFlat);
-                      //}
-                  //}
-                // /* Put the frame number and time stamp into the buffer */
-                //pImage->uniqueId = imageCounter;
-                //pImage->timeStamp = startTime.secPastEpoch + startTime.nsec / 1.e9;
+                /* stat2 = getIntegerParam(mmpadFlatFieldValid, &flatFieldValid);
+                if (flatFieldValid)
+                  {
+                    epicsInt32 *pData, *pFlat, i;
+                    for (i=0, pData = (epicsInt32 *)pImage->pData, pFlat = (epicsInt32 *)this->pFlatField->pData;
+                         i<dims[0]*dims[1];
+                         i++, pData++, pFlat++)
+                      {
+                        *pData = (epicsInt32)((this->averageFlatField * *pData) / *pFlat);
+                      }
+                  } */
+                 /* Put the frame number and time stamp into the buffer */
+                pImage->uniqueId = imageCounter;
+                pImage->timeStamp = startTime.secPastEpoch + startTime.nsec / 1.e9;
   
-                // /* Get any attributes that have been defined for this driver */
-                //this->getAttributes(pImage->pAttributeList);
+                 /* Get any attributes that have been defined for this driver */
+                this->getAttributes(pImage->pAttributeList);
   
-                // /* Call the NDArray callback */
-                // /* Must release the lock here, or we can get into a deadlock, because we can
-                 //* block on the plugin lock, and the plugin can be calling us */
-                //this->unlock();
-                //asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW,
-                          //"%s:%s: calling NDArray callback\n", driverName, functionName);
-                //doCallbacksGenericPointer(pImage, NDArrayData, 0);
-                //this->lock();
-                // /* Free the image buffer */
-                //pImage->release();
-            //}
-            if (1) {
-                acquire = 0;
+                 /* Call the NDArray callback */
+                 /* Must release the lock here, or we can get into a deadlock, because we can
+                 * block on the plugin lock, and the plugin can be calling us */
+                this->unlock();
+                asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW,
+                          "%s:%s: calling NDArray callback\n", driverName, functionName);
+                doCallbacksGenericPointer(pImage, NDArrayData, 0);
+                this->lock();
+                 /* Free the image buffer */
+                pImage->release();
             }
-//          else if (numImages > 1) {
-//              multipleFileNextImage++;
-//              multipleFileNumber++;
-//              if (multipleFileNextImage == numImages) acquire = 0;
-//            }
+          else if (numImages > 1) {
+              multipleFileNextImage++;
+              multipleFileNumber++;
+              if (multipleFileNextImage == numImages) acquire = 0;
+            }
   
         }
 
@@ -927,7 +937,7 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
                 epicsEventSignal(this->startEventId);
             } else {
                 epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "videomodeon %f", videomodeTime);
-                writeReadCamserver(0.2); 
+                writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
             }
         }
         if (!value && (acquire)) {
@@ -940,7 +950,7 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
                 epicsEventSignal(this->stopEventId);
             } else {
                 epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "videomodeoff");
-                writeReadCamserver(0.2);
+                writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
             }
         }
     } else if ((function == ADTriggerMode) ||
@@ -984,14 +994,14 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
     else if (function == mmpadBackSubFlag) {
         if (!value) {
             epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand milbacksub 0");
-            writeReadCamserver(0.2);
+            writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
             //writeReadCamserver(0);
             //writeCamserver(CAMSERVER_DEFAULT_TIMEOUT);
         } else {
             epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand milbacksub 1");
             writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
-             //writeReadCamserver(0);
-             //writeCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+            //writeReadCamserver(0);
+            //writeCamserver(CAMSERVER_DEFAULT_TIMEOUT);
         }
     }
     
@@ -1001,8 +1011,8 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
         getIntegerParam(mmpadMilDispBitShift,&milbitshift);
         getIntegerParam(mmpadMilDispOn,&milon);
         getIntegerParam(mmpadMilDispOffset,&miloffset);
-        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
-        writeReadCamserver(0.2);
+        //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
+        //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     }
     
     else if ((function == mmpadMilDispLog) ||
@@ -1011,8 +1021,8 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
         getIntegerParam(mmpadMilDispLog,&millog);
         getIntegerParam(mmpadMilDispScale,&milscale);
         getIntegerParam(mmpadMilDispOffset,&miloffset);
-        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand loglin %d %d %d",millog,milscale,miloffset);
-        writeReadCamserver(0.2);
+        //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand loglin %d %d %d",millog,milscale,miloffset);
+        //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     }
 
     else {
@@ -1272,9 +1282,9 @@ mmpadDetector::mmpadDetector(const char *portName, const char *camserverPort,
     }
     
     this->lock();  
-    epicsSnprintf(this->toCamserver, sizeof(this->toCamserver),"ldcmndfile /home/padme/tvx_64/tvx/camera/camserver/startup.cmd");
+    epicsSnprintf(this->toCamserver, sizeof(this->toCamserver),"ldcmndfile /local/home/dpuser/github/mmpad/tvx/camera/camserver/v2startA2.cmd");
     setStringParam(ADStatusMessage, "Initializing Camera");
-    writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT+8);
+    writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT+120);
    
     // ************ getting mildisp to go *********************
     status |= setIntegerParam(mmpadMilDispBitShift, 0);
@@ -1287,8 +1297,8 @@ mmpadDetector::mmpadDetector(const char *portName, const char *camserverPort,
     getIntegerParam(mmpadMilDispBitShift,&milbitshift);
     getIntegerParam(mmpadMilDispOn,&milon);
     getIntegerParam(mmpadMilDispOffset,&miloffset);
-    epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
-    writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+    //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
+    //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     // **************** end getting mildisp to go ******* slight kluge     
          
     /* Create the thread that updates the images */
