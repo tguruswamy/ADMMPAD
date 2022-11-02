@@ -35,7 +35,7 @@
 
 #include <epicsExport.h>
 
-#define DRIVER_VERSION      1
+#define DRIVER_VERSION      2
 #define DRIVER_REVISION     0
 #define DRIVER_MODIFICATION 0
 
@@ -203,20 +203,8 @@ void mmpadDetector::makeMultipleFileFormat(const char *baseFileName)
     }
     if ( (q=strrchr(p, '_')) ) {
         q++;
-        if (isdigit(*q) && isdigit(*(q+1)) && isdigit(*(q+2))) {
-            multipleFileNumber=atoi(q);
-            fmt=0;
-            p=q;
-            while(isdigit(*q)) {
-                fmt++;
-                q++;
-            }
-            *p='\0';
-            if (((fmt<3)  || ((fmt==3) && (numImages>999))) || 
-                ((fmt==4) && (numImages>9999))) { 
-                fmt=5;
-            }
-        } else if (*q) {
+        fmt=5;
+        if (*q) {
             strcat(p, "_"); /* force '_' ending */
         }
     } else {
@@ -225,6 +213,8 @@ void mmpadDetector::makeMultipleFileFormat(const char *baseFileName)
     /* Build the final format string */
     epicsSnprintf(this->multipleFileFormat, sizeof(this->multipleFileFormat), "%s%%.%dd%s",
                   mfTempFormat, fmt, mfExtension);
+
+    printf("Multiple file format: %s -> %s\n", baseFileName, this->multipleFileFormat);
 }
 
 
@@ -700,11 +690,11 @@ void mmpadDetector::mmpadTask()
         }
   
         while (acquire) {
-            if (1) {
+            if (numImages == 1) {
                 /* For single frame or alignment mode need to wait for 7OK response from camserver
                  * saying acquisition is complete before trying to read file, else we get a
                  * recent but stale file. */
-                //setStringParam(ADStatusMessage, "Waiting for 7OK response");
+                setStringParam(ADStatusMessage, "Waiting for 7OK response");
                 callParamCallbacks();
                 /* We release the mutex when waiting for 7OK because this takes a long time and
                  * we need to allow abort operations to get through */
@@ -750,8 +740,13 @@ void mmpadDetector::mmpadTask()
                 /* If there was an error jump to bottom of loop */
                 if (status) {
                     acquire = 0;
-                    if(status==asynTimeout)
+                    if(status==asynTimeout) {
                         stat2 = setStringParam(ADStatusMessage, "Timeout waiting for camserver response");
+                        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "K");
+                        writeCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+                        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand reset_frame");
+                        writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+                    }
                     continue;
                   }
 //              else if(!status) {
@@ -761,41 +756,40 @@ void mmpadDetector::mmpadTask()
                 epicsSnprintf(fullFileName, sizeof(fullFileName), multipleFileFormat,
                               multipleFileNumber);
                 stat2 = setStringParam(NDFullFileName, fullFileName);
+	              printf("Multiple file name: %s\n", fullFileName);
             }
             stat2 = getIntegerParam(NDArrayCallbacks, &arrayCallbacks);
   
-            if (arrayCallbacks && numImages==1)
+            if (arrayCallbacks)
               {
-                stat2 = getIntegerParam(NDArrayCounter, &imageCounter);
-                imageCounter++;
-                stat2 = setIntegerParam(NDArrayCounter, imageCounter);
-                 /* Call the callbacks to update any changes */
-                stat2 = callParamCallbacks();
-  
-                 /* Get an image buffer from the pool */
-		int sizeX;
-		int sizeY;
-                stat2 = getIntegerParam(ADMaxSizeX, &sizeX);
-                stat2 = getIntegerParam(ADMaxSizeY, &sizeY);
-		dims[0] = sizeX;
-		dims[1] = sizeY;
+                /* Get an image buffer from the pool */
+                int sizeX;
+                int sizeY;
+                stat2 = getIntegerParam(ADMaxSizeX, &sizeX); dims[0] = sizeX;
+                stat2 = getIntegerParam(ADMaxSizeY, &sizeY); dims[1] = sizeY;
                 pImage = this->pNDArrayPool->alloc(2, dims, NDInt32, 0, NULL);
                 epicsSnprintf(statusMessage, sizeof(statusMessage), "Reading image file %s", fullFileName);
                 stat2 = setStringParam(ADStatusMessage, statusMessage);
                 stat2 = callParamCallbacks();
                  /* We release the mutex when calling readImageFile, because this takes a long time and
                  * we need to allow abort operations to get through */
-                this->unlock();
+                //this->unlock();
                 status = readImageFile(fullFileName, &startTime, acquireTime + readImageFileTimeout, pImage);
-                this->lock();
-                 /* If there was an error jump to bottom of loop */
+                //this->lock();
+                /* If there was an error jump to bottom of loop */
                 if (status)
                   {
-	            printf("Error reading file!\n");
+	                  printf("Error reading file!\n");
                     acquire = 0;
                     pImage->release();
                     continue;
                   }
+
+                stat2 = getIntegerParam(NDArrayCounter, &imageCounter);
+                imageCounter++;
+                stat2 = setIntegerParam(NDArrayCounter, imageCounter);
+                 /* Call the callbacks to update any changes */
+                stat2 = callParamCallbacks();
   
                 /* stat2 = getIntegerParam(mmpadFlatFieldValid, &flatFieldValid);
                 if (flatFieldValid)
@@ -818,15 +812,18 @@ void mmpadDetector::mmpadTask()
                  /* Call the NDArray callback */
                  /* Must release the lock here, or we can get into a deadlock, because we can
                  * block on the plugin lock, and the plugin can be calling us */
-                this->unlock();
+                //this->unlock();
                 asynPrint(this->pasynUserSelf, ASYN_TRACE_FLOW,
                           "%s:%s: calling NDArray callback\n", driverName, functionName);
                 doCallbacksGenericPointer(pImage, NDArrayData, 0);
-                this->lock();
+                //this->lock();
                  /* Free the image buffer */
                 pImage->release();
             }
-          else if (numImages > 1) {
+            if (numImages == 1) {
+	            acquire = 0;
+	          } else if (numImages > 1) {
+              printf("Acquired image %d of %d.\n", multipleFileNumber, numImages);
               multipleFileNextImage++;
               multipleFileNumber++;
               if (multipleFileNextImage == numImages) acquire = 0;
@@ -867,6 +864,7 @@ void mmpadDetector::mmpadTask()
         status |= setIntegerParam(mmpadRoiLL,roill);
         status |= setIntegerParam(mmpadRoiLR,roilr);
         stat2 = callParamCallbacks();
+
         /* We are done acquiring */
         /* Wait for the 7OK response from camserver in the case of multiple images */
         if ((numImages > 1) && (status == asynSuccess)) {
@@ -883,18 +881,20 @@ void mmpadDetector::mmpadTask()
             /* We release the mutex because we may wait a long time and need to allow abort
              * operations to get through */
 //            this->unlock();
-//          readCamserver(timeout);
+//            readCamserver(timeout);
 //            this->lock();
         }
-        setShutter(0);
-        stat2 = setIntegerParam(ADAcquire, 0);
-        stat2 = setIntegerParam(mmpadArmed, 0);
-  
+
         /* If everything was ok, set the status back to idle */
         if (!status)
             stat2 = setIntegerParam(ADStatus, ADStatusIdle);
         else
             stat2 = setIntegerParam(ADStatus, ADStatusError);
+        stat2 = callParamCallbacks();
+
+        setShutter(0);
+        stat2 = setIntegerParam(ADAcquire, 0);
+        stat2 = setIntegerParam(mmpadArmed, 0);
   
         /* Call the callbacks to update any changes */
         stat2 = callParamCallbacks();
@@ -925,13 +925,14 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
     stringstream sstr;
     const char *functionName = "writeInt32";
 
-    getIntegerParam(ADAcquire, &acquire);
+    getIntegerParam(ADStatus, &adstatus);
     status = setIntegerParam(function, value);
   
     if (function == ADAcquire) {
         getIntegerParam(ADStatus, &adstatus);
         getIntegerParam(ADImageMode, &imageMode);
-        if (value && !acquire) {
+        if (value && (adstatus == ADStatusIdle || adstatus == ADStatusError || adstatus == ADStatusAborted)) {
+            printf("Starting acquisition.\n");
             if (imageMode == mmpadImageModeNormal) {
                 /* Send an event to wake up the mmpad task.  */
                 epicsEventSignal(this->startEventId);
@@ -940,7 +941,8 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
                 writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
             }
         }
-        if (!value && (acquire)) {
+        if (!value && (adstatus == ADStatusAcquire)) {
+            printf("Stopping acquisition.\n");
             /* This was a command to stop acquisition */
             if (imageMode == mmpadImageModeNormal) {
                 epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "K");
