@@ -1013,8 +1013,8 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
         getIntegerParam(mmpadMilDispBitShift,&milbitshift);
         getIntegerParam(mmpadMilDispOn,&milon);
         getIntegerParam(mmpadMilDispOffset,&miloffset);
-        //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
-        //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
+        writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     }
     
     else if ((function == mmpadMilDispLog) ||
@@ -1023,8 +1023,8 @@ asynStatus mmpadDetector::writeInt32(asynUser *pasynUser, epicsInt32 value)
         getIntegerParam(mmpadMilDispLog,&millog);
         getIntegerParam(mmpadMilDispScale,&milscale);
         getIntegerParam(mmpadMilDispOffset,&miloffset);
-        //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand loglin %d %d %d",millog,milscale,miloffset);
-        //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+        epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand loglin %d %d %d",millog,milscale,miloffset);
+        writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     }
 
     else {
@@ -1299,8 +1299,8 @@ mmpadDetector::mmpadDetector(const char *portName, const char *camserverPort,
     getIntegerParam(mmpadMilDispBitShift,&milbitshift);
     getIntegerParam(mmpadMilDispOn,&milon);
     getIntegerParam(mmpadMilDispOffset,&miloffset);
-    //epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
-    //writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
+    epicsSnprintf(this->toCamserver, sizeof(this->toCamserver), "mmpadcommand mildisp %d %d %d",milbitshift,milon,miloffset);
+    writeReadCamserver(CAMSERVER_DEFAULT_TIMEOUT);
     // **************** end getting mildisp to go ******* slight kluge     
          
     /* Create the thread that updates the images */
