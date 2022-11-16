@@ -29,7 +29,7 @@ drvAsynIPPortConfigure("camserver","164.54.106.89:41234")
 #drvAsynIPPortConfigure("camserver","gse-pilatus1:41234")
 
 # Set the input and output terminators.
-asynOctetSetInputEos("camserver", 0, "\030")
+asynOctetSetInputEos("camserver", 0, "\x18")
 asynOctetSetOutputEos("camserver", 0, "\n")
 
 asynSetTraceIOMask("camserver",0,2)
